@@ -40,6 +40,14 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <htslib/sam.h>
 #include <htslib/vcf.h>
 
+#ifdef OPENMP
+#include <omp.h>
+#endif
+
+#ifdef PROFILE
+#include "gperftools/profiler.h"
+#endif
+
 struct Config {
   int32_t blockcounter;
   std::string sample;
@@ -94,7 +102,7 @@ _loadMarkers(TConfig& c, std::string const& chrName, int32_t const chrLength, TS
   int32_t* gt = NULL;
 
   // Collect Snps for this chromosome
-  uint32_t chrid = bcf_hdr_name2id(hdr, chrName.c_str());
+  int32_t chrid = bcf_hdr_name2id(hdr, chrName.c_str());
   if (chrid < 0) return false;
   hts_itr_t* itervcf = bcf_itr_queryi(bcfidx, chrid, 0, chrLength);
   if (itervcf != NULL) {
