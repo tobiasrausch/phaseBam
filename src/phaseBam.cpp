@@ -309,7 +309,7 @@ int main(int argc, char **argv) {
 
   // Check command line arguments
   if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("vcffile"))) {
-    std::cout << "Usage: " << argv[0] << " [OPTIONS] --hap1 <h1.bam> --hap2 <h2.bam> --snps <snps.bcf> <unphased.bam>" << std::endl;
+    std::cout << "Usage: " << argv[0] << " [OPTIONS] -s NA12878 -v <snps.bcf> --hap1 <h1.bam> --hap2 <h2.bam> <unphased.bam>" << std::endl;
     std::cout << visible_options << "\n";
     return 1;
   } 
