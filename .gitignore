@@ -1,6 +1,7 @@
 .boost
 .htslib
 src/phaseBam
+src/evaluatePhasing
 
 # Compiled Object files
 *.slo

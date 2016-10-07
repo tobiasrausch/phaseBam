@@ -13,13 +13,6 @@ CXXFLAGS += -isystem ${SEQTK_ROOT} -isystem ${BOOST_ROOT} -pedantic -W -Wall -Wn
 LDFLAGS += -L${SEQTK_ROOT} -L${BOOST_ROOT}/stage/lib -lboost_iostreams -lboost_filesystem -lboost_system -lboost_program_options -lboost_date_time 
 
 # Additional flags for release/debug
-ifeq (${PARALLEL}, 1)
-	CXXFLAGS += -fopenmp -DOPENMP
-else
-	CXXFLAGS += -DNOPENMP
-endif
-
-# Additional flags for release/debug
 ifeq (${STATIC}, 1)
 	LDFLAGS += -static -static-libgcc -pthread -lhts -lz
 else
@@ -31,7 +24,7 @@ else ifeq (${DEBUG}, 2)
 	CXXFLAGS += -g -O0 -fno-inline -DPROFILE
 	LDFLAGS += -lprofiler -ltcmalloc
 else
-	CXXFLAGS += -O3 -DNDEBUG
+	CXXFLAGS += -O3 -fno-tree-vectorize -DNDEBUG
 endif
 
 
@@ -41,7 +34,7 @@ BOOSTSOURCES = $(wildcard src/modular-boost/libs/iostreams/include/boost/iostrea
 PHASESOURCES = $(wildcard src/*.h) $(wildcard src/*.cpp)
 
 # Targets
-TARGETS = .htslib .boost src/phaseBam
+TARGETS = .htslib .boost src/phaseBam src/evaluatePhasing
 
 all:   	$(TARGETS)
 
@@ -52,6 +45,9 @@ all:   	$(TARGETS)
 	cd src/modular-boost && ./bootstrap.sh --prefix=${PWD}/src/modular-boost --without-icu --with-libraries=iostreams,filesystem,system,program_options,date_time && ./b2 && ./b2 headers && cd ../../ && touch .boost
 
 src/phaseBam: .htslib .boost $(PHASESOURCES)
+	$(CXX) $(CXXFLAGS) $@.cpp -o $@ $(LDFLAGS)
+
+src/evaluatePhasing: .htslib .boost $(PHASESOURCES)
 	$(CXX) $(CXXFLAGS) $@.cpp -o $@ $(LDFLAGS)
 
 clean:
