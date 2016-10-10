@@ -37,6 +37,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include <boost/tuple/tuple.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/progress.hpp>
+#include <htslib/faidx.h>
 #include <htslib/sam.h>
 #include <htslib/vcf.h>
 
@@ -48,100 +49,19 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include "gperftools/profiler.h"
 #endif
 
+#include "util.h"
+
+using namespace phasebam;
+
 struct Config {
   int32_t blockcounter;
   std::string sample;
+  boost::filesystem::path genome;
   boost::filesystem::path h1bam;
   boost::filesystem::path h2bam;
   boost::filesystem::path bamfile;
   boost::filesystem::path vcffile;
 };
-
-struct Snp {
-  uint32_t blockid;
-  uint32_t pos;
-  char h1;
-  char h2;
-  
-  Snp() : blockid(0), pos(0), h1('N'), h2('N') {}
-  Snp(uint32_t b, uint32_t p, char r, char a) : blockid(b), pos(p), h1(r), h2(a) {}
-};
-
-template<typename TRecord>
-struct SortSnps : public std::binary_function<TRecord, TRecord, bool> {
-  inline bool operator()(TRecord const& s1, TRecord const& s2) const {
-    return s1.pos < s2.pos;
-  }
-};
-
-inline uint32_t
-lastAlignedPosition(bam1_t const* rec) {
-  uint32_t* cigar = bam_get_cigar(rec);
-  uint32_t alen = 0;
-  for (std::size_t i = 0; i < rec->core.n_cigar; ++i)
-    if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CDEL)) alen += bam_cigar_oplen(cigar[i]);
-  return rec->core.pos + alen;
-}
-
-template<typename TConfig, typename TSnpVector>
-inline bool
-_loadMarkers(TConfig& c, std::string const& chrName, int32_t const chrLength, TSnpVector& snps) {
-  typedef typename TSnpVector::value_type TSnp;
-  
-  // Load bcf file
-  htsFile* ifile = hts_open(c.vcffile.string().c_str(), "r");
-  hts_idx_t* bcfidx = bcf_index_load(c.vcffile.string().c_str());
-  bcf_hdr_t* hdr = bcf_hdr_read(ifile);
-  int32_t sampleIndex = -1;
-  for (int i = 0; i < bcf_hdr_nsamples(hdr); ++i)
-    if (hdr->samples[i] == c.sample) sampleIndex = i;
-  if (sampleIndex < 0) return false;
-
-  // Genotypes
-  int ngt = 0;
-  int32_t* gt = NULL;
-
-  // Collect Snps for this chromosome
-  int32_t chrid = bcf_hdr_name2id(hdr, chrName.c_str());
-  if (chrid < 0) return false;
-  hts_itr_t* itervcf = bcf_itr_queryi(bcfidx, chrid, 0, chrLength);
-  if (itervcf != NULL) {
-    bcf1_t* rec = bcf_init1();
-    while (bcf_itr_next(ifile, itervcf, rec) >= 0) {
-      bcf_unpack(rec, BCF_UN_ALL);
-      bcf_get_genotypes(hdr, rec, &gt, &ngt);
-      if ((bcf_gt_allele(gt[sampleIndex*2]) != -1) && (bcf_gt_allele(gt[sampleIndex*2 + 1]) != -1) && (!bcf_gt_is_missing(gt[sampleIndex*2])) && (!bcf_gt_is_missing(gt[sampleIndex*2 + 1])) && (bcf_gt_is_phased(gt[sampleIndex*2 + 1]))) {
-	int gt_type = bcf_gt_allele(gt[sampleIndex*2]) + bcf_gt_allele(gt[sampleIndex*2 + 1]);
-	if (gt_type == 1) {
-	  std::vector<std::string> alleles;
-	  for(std::size_t i = 0; i<rec->n_allele; ++i) alleles.push_back(std::string(rec->d.allele[i]));
-	  // Only bi-allelic SNPs
-	  if ((alleles.size() == 2) && (alleles[0].size() == 1) && (alleles[1].size() == 1)) {
-	    if (bcf_gt_allele(gt[sampleIndex*2]) == 1) snps.push_back(TSnp(c.blockcounter, rec->pos, alleles[1][0], alleles[0][0]));
-	    else snps.push_back(TSnp(c.blockcounter, rec->pos, alleles[0][0], alleles[1][0]));
-	  }
-	}
-      } else {
-	// New phased block
-	++c.blockcounter;
-      }
-    }
-    bcf_destroy(rec);
-    hts_itr_destroy(itervcf);
-  }
-  if (gt != NULL) free(gt);
-  
-  // Close VCF
-  bcf_hdr_destroy(hdr);
-  hts_idx_destroy(bcfidx);
-  bcf_close(ifile);
-    
-  // Sort Snps by position
-  std::sort(snps.begin(), snps.end(), SortSnps<TSnp>());
-  
-  return true;
-}
-
 
 template<typename TConfig>
 inline int
@@ -162,63 +82,88 @@ phaseBamRun(TConfig& c) {
 
   // Open output file
   samFile* h1bam = sam_open(c.h1bam.string().c_str(), "wb");
-  sam_hdr_write(h1bam, hdr);
+  if (sam_hdr_write(h1bam, hdr) != 0) {
+    std::cerr << "Could not write ouptut file header!" << std::endl;
+    return -1;
+  }
 
   samFile* h2bam = sam_open(c.h2bam.string().c_str(), "wb");
-  sam_hdr_write(h2bam, hdr);
+  if (sam_hdr_write(h2bam, hdr) != 0) {
+    std::cerr << "Could not write ouptut file header!" << std::endl;
+    return -1;
+  }
 
   // Assign reads to SNPs
-  uint32_t assignedReads = 0;
+  uint32_t assignedReadsH1 = 0;
+  uint32_t assignedReadsH2 = 0;
   uint32_t unassignedReads = 0;
-  uint64_t assignedBases = 0;
+  uint64_t assignedBasesH1 = 0;
+  uint64_t assignedBasesH2 = 0;
   uint64_t unassignedBases = 0;
-  for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
-    ++show_progress;
-    // New chromosome -> new phased block
-    ++c.blockcounter;
-    
-    // Load variation data
-    typedef std::vector<Snp> TSnpVector;
-    TSnpVector snps;
+  faidx_t* fai = fai_load(c.genome.string().c_str());
+  //for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
+  for (int refIndex = 19; refIndex<20; ++refIndex) {
     std::string chrName(hdr->target_name[refIndex]);
-    if (_loadMarkers(c, chrName, hdr->target_len[refIndex], snps)) {
-      // Assign reads to haplotypes
-      hts_itr_t* iter = sam_itr_queryi(idx, refIndex, 0, hdr->target_len[refIndex]);
-      bam1_t* rec = bam_init1();
-      while (sam_itr_next(samfile, iter, rec) >= 0) {
-	uint32_t hp1votes = 0;
-	uint32_t hp2votes = 0;
-	TSnpVector::const_iterator iSnp = std::lower_bound(snps.begin(), snps.end(), Snp(0, rec->core.pos, 'A', 'A'), SortSnps<Snp>());
-	TSnpVector::const_iterator iSnpEnd = std::upper_bound(snps.begin(), snps.end(), Snp(0, lastAlignedPosition(rec), 'A', 'A'), SortSnps<Snp>());
-	if (iSnp != iSnpEnd) {
-	  // Get read sequence
-	  std::string sequence;
-	  sequence.resize(rec->core.l_qseq);
-	  uint8_t* seqptr = bam_get_seq(rec);
-	  for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+    ++show_progress;
+
+    // Load reference
+    int32_t seqlen = -1;
+    char* seq = faidx_fetch_seq(fai, chrName.c_str(), 0, hdr->target_len[refIndex], &seqlen);
+    
+    // Load het. markers
+    typedef std::vector<Variant> TPhasedVariants;
+    TPhasedVariants pv;
+    if (!_loadVariants(c.sample, chrName, c.vcffile.string(), pv)) return -1;
+    
+    // Assign reads to haplotypes
+    hts_itr_t* iter = sam_itr_queryi(idx, refIndex, 0, hdr->target_len[refIndex]);
+    bam1_t* rec = bam_init1();
+    while (sam_itr_next(samfile, iter, rec) >= 0) {
+      uint32_t hp1votes = 0;
+      uint32_t hp2votes = 0;
+      TPhasedVariants::const_iterator vIt = std::lower_bound(pv.begin(), pv.end(), Variant(rec->core.pos), SortVariants<Variant>());
+      TPhasedVariants::const_iterator vItEnd = std::upper_bound(pv.begin(), pv.end(), Variant(lastAlignedPosition(rec)), SortVariants<Variant>());
+      if (vIt != vItEnd) {
+	// Get read sequence
+	std::string sequence;
+	sequence.resize(rec->core.l_qseq);
+	uint8_t* seqptr = bam_get_seq(rec);
+	for (int32_t i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
 	  
-	  // Parse CIGAR
-	  uint32_t* cigar = bam_get_cigar(rec);
-	  for(;iSnp != iSnpEnd; ++iSnp) {
-	    uint32_t gp = rec->core.pos; // Genomic position
-	    uint32_t sp = 0; // Sequence position
-	    for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
-	      if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) sp += bam_cigar_oplen(cigar[i]);
-	      else if (bam_cigar_op(cigar[i]) == BAM_CINS) sp += bam_cigar_oplen(cigar[i]);
-	      else if (bam_cigar_op(cigar[i]) == BAM_CDEL) gp += bam_cigar_oplen(cigar[i]);
-	      else if (bam_cigar_op(cigar[i]) == BAM_CMATCH) {
-		if (gp + bam_cigar_oplen(cigar[i]) < iSnp->pos) {
-		  gp += bam_cigar_oplen(cigar[i]);
-		  sp += bam_cigar_oplen(cigar[i]);
-		} else {
-		  for(std::size_t k = 0; k<bam_cigar_oplen(cigar[i]); ++k, ++sp, ++gp) {
-		    if (gp == iSnp->pos) {
-		      if (sequence[sp] == iSnp->h1) ++hp1votes;
-		      else if (sequence[sp] == iSnp->h2) ++hp2votes;
+	// Parse CIGAR
+	uint32_t* cigar = bam_get_cigar(rec);
+	for(;vIt != vItEnd; ++vIt) {
+	  int32_t gp = rec->core.pos; // Genomic position
+	  int32_t sp = 0; // Sequence position
+	  bool varFound = false;
+	  for (std::size_t i = 0; ((i < rec->core.n_cigar) && (!varFound)); ++i) {
+	    if (bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) sp += bam_cigar_oplen(cigar[i]);
+	    else if (bam_cigar_op(cigar[i]) == BAM_CINS) sp += bam_cigar_oplen(cigar[i]);
+	    else if (bam_cigar_op(cigar[i]) == BAM_CDEL) gp += bam_cigar_oplen(cigar[i]);
+	    else if (bam_cigar_op(cigar[i]) == BAM_CMATCH) {
+	      if (gp + (int32_t) bam_cigar_oplen(cigar[i]) < vIt->pos) {
+		gp += bam_cigar_oplen(cigar[i]);
+		sp += bam_cigar_oplen(cigar[i]);
+	      } else {
+		for(std::size_t k = 0; k<bam_cigar_oplen(cigar[i]); ++k, ++sp, ++gp) {
+		  if (gp == vIt->pos) {
+		    varFound = true;
+		    // Check REF allele
+		    if (vIt->ref == std::string(seq + gp, seq + gp + vIt->ref.size())) {
+		      // Check ALT allele
+		      if ((sp + vIt->alt.size() < sequence.size()) && (sp + vIt->ref.size() < sequence.size())) {
+			if ((sequence.substr(sp, vIt->alt.size()) == vIt->alt) && (sequence.substr(sp, vIt->ref.size()) != vIt->ref)) {
+			  // ALT supporting read
+			  if (vIt->hap) ++hp1votes;
+			  else ++hp2votes;
+			} else if ((sequence.substr(sp, vIt->alt.size()) != vIt->alt) && (sequence.substr(sp, vIt->ref.size()) == vIt->ref)) {
+			  // REF supporting read
+			  if (vIt->hap) ++hp2votes;
+			  else ++hp1votes;
+			}
+		      }
 		    }
 		  }
-		  // SNP has been found -> break
-		  break;
 		}
 	      }
 	    }
@@ -228,26 +173,34 @@ phaseBamRun(TConfig& c) {
 	if (hp1votes > 2*hp2votes) hp = 1;
 	else if (hp2votes > 2*hp1votes) hp = 2;
 	if (hp) {
-	  ++assignedReads;
-	  assignedBases += rec->core.l_qseq;
-	  int32_t ps = c.blockcounter;
-	  bam_aux_append(rec, "PS", 'i', 4, (uint8_t*)&ps);
 	  if (hp == 1) {
+	    ++assignedReadsH1;
+	    assignedBasesH1 += rec->core.l_qseq;
 	    bam_aux_append(rec, "HP", 'i', 4, (uint8_t*)&hp);
-	    sam_write1(h1bam, hdr, rec);
+	    if (!sam_write1(h1bam, hdr, rec)) {
+	      std::cerr << "Could not write to bam file!" << std::endl;
+	      return -1;
+	    }
 	  } else {
+	    ++assignedReadsH2;
+	    assignedBasesH2 += rec->core.l_qseq;
 	    bam_aux_append(rec, "HP", 'i', 4, (uint8_t*)&hp);
-	    sam_write1(h2bam, hdr, rec);
+	    if (!sam_write1(h2bam, hdr, rec)) {
+	      std::cerr << "Could not write to bam file!" << std::endl;
+	      return -1;
+	    }
 	  }
 	} else {
 	  ++unassignedReads;
 	  unassignedBases += rec->core.l_qseq;
 	}
       }
-      bam_destroy1(rec);
-      hts_itr_destroy(iter);
     }
+    bam_destroy1(rec);
+    hts_itr_destroy(iter);
+    if (seqlen) free(seq);
   }
+  fai_destroy(fai);
 
   // Close bam
   bam_hdr_destroy(hdr);
@@ -263,10 +216,10 @@ phaseBamRun(TConfig& c) {
   std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Done." << std::endl;
 
   // Statistics
-  uint64_t sumReads = assignedReads + unassignedReads;
-  uint64_t sumBases = assignedBases + unassignedBases;
-  std::cout << "Assigned Reads=" << assignedReads << ", Unassigned Reads=" << unassignedReads << ", Fraction assigned=" << (float) assignedReads / (float) sumReads << std::endl;
-  std::cout << "Assigned Bases=" << assignedBases << ", Unassigned Bases=" << unassignedBases << ", Fraction assigned=" << (float) assignedBases / (float) sumBases << std::endl;
+  uint64_t sumReads = assignedReadsH1 + assignedReadsH2 + unassignedReads;
+  uint64_t sumBases = assignedBasesH1 + assignedBasesH2 + unassignedBases;
+  std::cout << "AssignedReadsH1=" << assignedReadsH1 << ", AssignedReadsH2=" << assignedReadsH2 << ", UnassignedReads=" << unassignedReads << ", FractionReadsAssigned=" << (float) (assignedReadsH1 + assignedReadsH2) / (float) sumReads << std::endl;
+  std::cout << "AssignedBasesH1=" << assignedBasesH1 << ", AssignedBasesH2=" << assignedBasesH2 << ", UnassignedBases=" << unassignedBases << ", FractionBasesAssigned=" << (float) (assignedBasesH1 + assignedBasesH2) / (float) sumBases << std::endl;
 
 
 #ifdef PROFILE
@@ -285,10 +238,11 @@ int main(int argc, char **argv) {
   boost::program_options::options_description generic("Generic options");
   generic.add_options()
     ("help,?", "show help message")
+    ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "reference fasta file")
     ("hap1,p", boost::program_options::value<boost::filesystem::path>(&c.h1bam)->default_value("h1.bam"), "haplotype 1 BAM file")
     ("hap2,q", boost::program_options::value<boost::filesystem::path>(&c.h2bam)->default_value("h2.bam"), "haplotype 2 BAM file")
     ("sample,s", boost::program_options::value<std::string>(&c.sample)->default_value("NA12878"), "sample name")
-    ("vcffile,v", boost::program_options::value<boost::filesystem::path>(&c.vcffile), "phased SNP BCF file")
+    ("vcffile,v", boost::program_options::value<boost::filesystem::path>(&c.vcffile), "phased BCF file")
     ;
 
   boost::program_options::options_description hidden("Hidden options");
@@ -308,11 +262,11 @@ int main(int argc, char **argv) {
   boost::program_options::notify(vm);
 
   // Check command line arguments
-  if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("vcffile"))) {
-    std::cout << "Usage: " << argv[0] << " [OPTIONS] -s NA12878 -v <snps.bcf> --hap1 <h1.bam> --hap2 <h2.bam> <unphased.bam>" << std::endl;
+  if ((vm.count("help")) || (!vm.count("input-file")) || (!vm.count("genome")) || (!vm.count("vcffile"))) {
+    std::cout << "Usage: " << argv[0] << " [OPTIONS] -g <ref.fa> -s NA12878 -v <snps.bcf> --hap1 <h1.bam> --hap2 <h2.bam> <unphased.bam>" << std::endl;
     std::cout << visible_options << "\n";
     return 1;
-  } 
+  }
 
   // Check input BAM file
   if (vm.count("input-file")) {

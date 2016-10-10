@@ -48,78 +48,17 @@ Contact: Tobias Rausch (rausch@embl.de)
 #include "gperftools/profiler.h"
 #endif
 
+#include "util.h"
+
+
+using namespace phasebam;
+
 struct Config {
   std::string chrom;
   std::string sample;
   boost::filesystem::path p1;
   boost::filesystem::path p2;
 };
-
-struct Variant {
-  int32_t pos;
-  std::string ref;
-  std::string alt;
-  bool hap;
-
-  Variant(int32_t p, std::string r, std::string a, bool h) : pos(p), ref(r), alt(a), hap(h) {}
-};
-
-
-template<typename TConfig, typename TPhasedVariants>
-inline bool
-_loadVariants(TConfig const& c, std::string const& bcffile, TPhasedVariants& pV) {
-  typedef typename TPhasedVariants::value_type TVariant;
-
-  // Load bcf file
-  htsFile* ifile = hts_open(bcffile.c_str(), "r");
-  hts_idx_t* bcfidx = bcf_index_load(bcffile.c_str());
-  bcf_hdr_t* hdr = bcf_hdr_read(ifile);
-  int32_t sampleIndex = -1;
-  for (int i = 0; i < bcf_hdr_nsamples(hdr); ++i)
-    if (hdr->samples[i] == c.sample) sampleIndex = i;
-  if (sampleIndex < 0) {
-    std::cerr << "Sample not found " << c.sample << std::endl;
-    return false;
-  }
-
-  // Genotypes
-  int ngt = 0;
-  int32_t* gt = NULL;
-  
-  // Collect Snps for this chromosome
-  int32_t chrid = bcf_hdr_name2id(hdr, c.chrom.c_str());
-  if (chrid < 0) {
-    std::cerr << "Chromosome not found " << c.chrom << std::endl;
-    return false;
-  }
-  hts_itr_t* itervcf = bcf_itr_querys(bcfidx, hdr, c.chrom.c_str());
-  if (itervcf != NULL) {
-    bcf1_t* rec = bcf_init1();
-    while (bcf_itr_next(ifile, itervcf, rec) >= 0) {
-      bcf_unpack(rec, BCF_UN_ALL);
-      bcf_get_genotypes(hdr, rec, &gt, &ngt);
-      if ((bcf_gt_allele(gt[sampleIndex*2]) != -1) && (bcf_gt_allele(gt[sampleIndex*2 + 1]) != -1) && (!bcf_gt_is_missing(gt[sampleIndex*2])) && (!bcf_gt_is_missing(gt[sampleIndex*2 + 1])) && (bcf_gt_is_phased(gt[sampleIndex*2 + 1]))) {
-	int gt_type = bcf_gt_allele(gt[sampleIndex*2]) + bcf_gt_allele(gt[sampleIndex*2 + 1]);
-	if (gt_type == 1) {
-	  std::vector<std::string> alleles;
-	  for(std::size_t i = 0; i<rec->n_allele; ++i) alleles.push_back(std::string(rec->d.allele[i]));
-	  // Only bi-allelic variants
-	  if (alleles.size() == 2) pV.push_back(TVariant(rec->pos, std::string(alleles[0]), std::string(alleles[1]), bcf_gt_allele(gt[sampleIndex*2])));
-	}
-      }
-    }
-    bcf_destroy(rec);
-    hts_itr_destroy(itervcf);
-  }
-  if (gt != NULL) free(gt);
-  
-  // Close VCF
-  bcf_hdr_destroy(hdr);
-  hts_idx_destroy(bcfidx);
-  bcf_close(ifile);
-
-  return true;
-}
 
 
 template<typename TConfig>
@@ -134,8 +73,8 @@ evaluatePhasing(TConfig& c) {
   typedef std::vector<Variant> TPhasedVariants;
   TPhasedVariants pV1;
   TPhasedVariants pV2;
-  if (!_loadVariants(c, c.p1.string(), pV1)) return -1;
-  if (!_loadVariants(c, c.p2.string(), pV2)) return -1;
+  if (!_loadVariants(c.sample, c.chrom, c.p1.string(), pV1)) return -1;
+  if (!_loadVariants(c.sample, c.chrom, c.p2.string(), pV2)) return -1;
 
   // Find common variants
   typedef std::vector<bool> THap;
