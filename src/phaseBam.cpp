@@ -194,9 +194,10 @@ phaseBamRun(TConfig& c) {
       if (h1.find(hash_pair(rec)) != h1.end()) h1Found = true;
       if (h2.find(hash_pair(rec)) != h2.end()) h2Found = true;
       if ((h1Found) && (h2Found)) {
+	// Inconsistent haplotype assignment for this pair
+	std::cout << "Read\t" << bam_get_qname(rec) << "\t" <<  hdr->target_name[rec->core.tid] << "\t" << "\t" << rec->core.pos << "\t" << hdr->target_name[rec->core.mtid] << "\t" << rec->core.mpos << std::endl;
 	++ambiguousReads;
 	ambiguousBases += rec->core.l_qseq;
-	// Inconsistent haplotype assignment for this pair
       } else if (h1Found) {
 	int32_t hp = 1;
 	++assignedReadsH1;
