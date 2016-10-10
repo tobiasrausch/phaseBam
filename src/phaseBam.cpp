@@ -101,8 +101,7 @@ phaseBamRun(TConfig& c) {
   uint64_t assignedBasesH2 = 0;
   uint64_t unassignedBases = 0;
   faidx_t* fai = fai_load(c.genome.string().c_str());
-  //for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
-  for (int refIndex = 19; refIndex<20; ++refIndex) {
+  for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
     std::string chrName(hdr->target_name[refIndex]);
     ++show_progress;
 
