@@ -24,6 +24,8 @@ Contact: Tobias Rausch (rausch@embl.de)
 #ifndef UTIL_H
 #define UTIL_H
 
+#include <boost/unordered_map.hpp>
+#include <boost/algorithm/string.hpp>
 #include <htslib/sam.h>
 
 
@@ -48,6 +50,30 @@ namespace phasebam
     }
   };
 
+
+  inline unsigned
+  hash_string(const char *s) {
+    unsigned h = *s;
+    if (h) for (++s ; *s; ++s) h = (h << 5) - h + *s;
+    return h;
+  }
+
+  inline std::size_t
+  hash_pair(bam1_t* rec) {
+    std::size_t seed = 0;
+    if (rec->core.flag & BAM_FREAD2) {
+      boost::hash_combine(seed, rec->core.mtid);
+      boost::hash_combine(seed, rec->core.mpos);
+      boost::hash_combine(seed, rec->core.tid);
+      boost::hash_combine(seed, rec->core.pos);
+    } else {
+      boost::hash_combine(seed, rec->core.tid);
+      boost::hash_combine(seed, rec->core.pos);
+      boost::hash_combine(seed, rec->core.mtid);
+      boost::hash_combine(seed, rec->core.mpos);
+    }
+    return seed;
+  }
 
   inline uint32_t
   lastAlignedPosition(bam1_t const* rec) {
