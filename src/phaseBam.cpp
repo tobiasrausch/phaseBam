@@ -103,18 +103,20 @@ phaseBamRun(TConfig& c) {
   uint64_t unassignedBases = 0;
   uint32_t ambiguousBases = 0;
   faidx_t* fai = fai_load(c.genome.string().c_str());
-  for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
+  //for (int refIndex = 0; refIndex<hdr->n_targets; ++refIndex) {
+  for (int refIndex = 19; refIndex<20; ++refIndex) {
     std::string chrName(hdr->target_name[refIndex]);
     ++show_progress;
 
-    // Load reference
-    int32_t seqlen = -1;
-    char* seq = faidx_fetch_seq(fai, chrName.c_str(), 0, hdr->target_len[refIndex], &seqlen);
-    
     // Load het. markers
     typedef std::vector<Variant> TPhasedVariants;
     TPhasedVariants pv;
     if (!_loadVariants(c.sample, chrName, c.vcffile.string(), pv)) return -1;
+    if (pv.empty()) continue;
+    
+    // Load reference
+    int32_t seqlen = -1;
+    char* seq = faidx_fetch_seq(fai, chrName.c_str(), 0, hdr->target_len[refIndex], &seqlen);    
     
     // Assign reads to haplotypes
     std::set<std::size_t> h1;
