@@ -235,6 +235,8 @@ phaseBamRun(TConfig& c) {
   // Close output BAMs
   sam_close(h1bam);
   sam_close(h2bam);
+  bam_index_build(c.h1bam.string().c_str(), 0);
+  bam_index_build(c.h2bam.string().c_str(), 0);
 
   // End
   now = boost::posix_time::second_clock::local_time();
