@@ -192,34 +192,34 @@ phaseBamRun(TConfig& c) {
     while (sam_itr_next(samfile, itr, r) >= 0) {
       bool h1Found = false;
       bool h2Found = false;
-      if (h1.find(hash_pair(rec)) != h1.end()) h1Found = true;
-      if (h2.find(hash_pair(rec)) != h2.end()) h2Found = true;
+      if (h1.find(hash_pair(r)) != h1.end()) h1Found = true;
+      if (h2.find(hash_pair(r)) != h2.end()) h2Found = true;
       if ((h1Found) && (h2Found)) {
 	// Inconsistent haplotype assignment for this pair
-	std::cout << "Read\t" << bam_get_qname(rec) << "\t" <<  hdr->target_name[rec->core.tid] << "\t" << "\t" << rec->core.pos << "\t" << hdr->target_name[rec->core.mtid] << "\t" << rec->core.mpos << std::endl;
+	std::cout << "Read\t" << bam_get_qname(r) << "\t" <<  hdr->target_name[r->core.tid] << "\t" << "\t" << r->core.pos << "\t" << hdr->target_name[r->core.mtid] << "\t" << r->core.mpos << std::endl;
 	++ambiguousReads;
-	ambiguousBases += rec->core.l_qseq;
+	ambiguousBases += r->core.l_qseq;
       } else if (h1Found) {
 	int32_t hp = 1;
 	++assignedReadsH1;
-	assignedBasesH1 += rec->core.l_qseq;
-	bam_aux_append(rec, "HP", 'i', 4, (uint8_t*)&hp);
-	if (!sam_write1(h1bam, hdr, rec)) {
+	assignedBasesH1 += r->core.l_qseq;
+	bam_aux_append(r, "HP", 'i', 4, (uint8_t*)&hp);
+	if (!sam_write1(h1bam, hdr, r)) {
 	  std::cerr << "Could not write to bam file!" << std::endl;
 	  return -1;
 	}
       } else if (h2Found) {
 	int32_t hp = 2;
 	++assignedReadsH2;
-	assignedBasesH2 += rec->core.l_qseq;
-	bam_aux_append(rec, "HP", 'i', 4, (uint8_t*)&hp);
-	if (!sam_write1(h2bam, hdr, rec)) {
+	assignedBasesH2 += r->core.l_qseq;
+	bam_aux_append(r, "HP", 'i', 4, (uint8_t*)&hp);
+	if (!sam_write1(h2bam, hdr, r)) {
 	  std::cerr << "Could not write to bam file!" << std::endl;
 	  return -1;
 	}
       } else {
 	++unassignedReads;
-	unassignedBases += rec->core.l_qseq;
+	unassignedBases += r->core.l_qseq;
       }
     }
     bam_destroy1(r);
