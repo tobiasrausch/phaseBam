@@ -21,22 +21,22 @@ Contact: Tobias Rausch (rausch@embl.de)
 ============================================================================
 */
 
-#define _SECURE_SCL 0
-#define _SCL_SECURE_NO_WARNINGS
 #include <iostream>
-#include <vector>
 #include <fstream>
-
-#define BOOST_DISABLE_ASSERTS
 #include <boost/program_options/cmdline.hpp>
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/parsers.hpp>
 #include <boost/program_options/variables_map.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/date_time/gregorian/gregorian.hpp>
-#include <boost/tuple/tuple.hpp>
+#include <boost/iostreams/device/file.hpp>
+#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
+#include <boost/iostreams/filter/gzip.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/tokenizer.hpp>
 #include <boost/progress.hpp>
+
 #include <htslib/sam.h>
 #include <htslib/vcf.h>
 
@@ -56,6 +56,7 @@ using namespace phasebam;
 struct Config {
   std::string chrom;
   std::string sample;
+  boost::filesystem::path outfile;
   boost::filesystem::path p1;
   boost::filesystem::path p2;
 };
@@ -77,9 +78,8 @@ evaluatePhasing(TConfig& c) {
   if (!_loadVariants(c.sample, c.chrom, c.p2.string(), pV2)) return -1;
 
   // Find common variants
-  typedef std::vector<bool> THap;
-  THap hap1;
-  THap hap2;
+  TPhasedVariants hap1;
+  TPhasedVariants hap2;
   int32_t commonSites = 0;
   int32_t distinctSites1 = 0;
   int32_t distinctSites2 = 0;
@@ -97,8 +97,8 @@ evaluatePhasing(TConfig& c) {
     } else { 
       if ((pV1[pos1].ref == pV2[pos2].ref) && (pV1[pos1].alt == pV2[pos2].alt)) {
 	++commonSites;
-	hap1.push_back(pV1[pos1].hap);
-	hap2.push_back(pV2[pos2].hap);
+	hap1.push_back(pV1[pos1]);
+	hap2.push_back(pV2[pos2]);
       } else {
 	++distinctSites1;
 	++distinctSites2;
@@ -109,17 +109,35 @@ evaluatePhasing(TConfig& c) {
   }
 
   // Get differences
+  typedef std::vector<bool> THap;
   THap diff1(hap1.size() - 1, 0);
   for(uint32_t i=1; i<hap1.size();++i)
-    if (hap1[i-1]!=hap1[i]) diff1[i-1]=1;
+    if (hap1[i-1].hap != hap1[i].hap) diff1[i-1]=1;
   THap diff2(hap2.size() - 1, 0);
   for(uint32_t i=1; i<hap2.size();++i)
-    if (hap2[i-1]!=hap2[i]) diff2[i-1]=1;
+    if (hap2[i-1].hap != hap2[i].hap) diff2[i-1]=1;
 
-  // Switch errors
+  // Output switch errors
+  boost::iostreams::filtering_ostream dataOut;
+  dataOut.push(boost::iostreams::gzip_compressor());
+  dataOut.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
+  dataOut << "distance\tacPre\tacSuc" << std::endl;
+  
+  int32_t lastPos = -1;
   int32_t switchcount = 0;
-  for(uint32_t i=0; i<diff1.size(); ++i)
-    if (diff1[i] != diff2[i]) ++switchcount;
+  for(uint32_t i=0; i<diff1.size(); ++i) {
+    if (diff1[i] != diff2[i]) {
+      int32_t distance = -1;
+      if (lastPos != -1) distance = (hap1[i].pos - lastPos);
+      lastPos = hap1[i+1].pos;
+      if (distance != -1) dataOut << distance << "\t";
+      else dataOut << "NA\t";
+      if ((hap1[i].ac != -1) && (hap1[i+1].ac != -1)) dataOut << hap1[i].ac << '\t' << hap1[i+1].ac << std::endl;
+      else dataOut << "NA\tNA" << std::endl;
+      ++switchcount;
+    }
+  }
+
 
   // Switch count
   std::cout << "Sample\tChromosome\tCommonSites\tDistinctBCF1\tDistinctBCF2\tSwitchErrors\tSwitchErrorRate" << std::endl;
@@ -144,6 +162,7 @@ int main(int argc, char **argv) {
     ("phased,p", boost::program_options::value<boost::filesystem::path>(&c.p1), "gold-standard phased BCF")
     ("sample,s", boost::program_options::value<std::string>(&c.sample)->default_value("HG00512"), "sample name")
     ("chrom,c", boost::program_options::value<std::string>(&c.chrom)->default_value("1"), "chromosome name")
+    ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("swerr.gz"), "switch error")
     ;
 
   boost::program_options::options_description hidden("Hidden options");

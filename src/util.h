@@ -34,12 +34,13 @@ namespace phasebam
 
   struct Variant {
     int32_t pos;
+    int32_t ac;
     std::string ref;
     std::string alt;
     bool hap;
 
     Variant(int32_t p) : pos(p), ref(""), alt(""), hap(0) {}
-    Variant(int32_t p, std::string r, std::string a, bool h) : pos(p), ref(r), alt(a), hap(h) {}
+    Variant(int32_t p, int32_t acval, std::string r, std::string a, bool h) : pos(p), ac(acval), ref(r), alt(a), hap(h) {}
   };
 
 
@@ -104,6 +105,8 @@ namespace phasebam
     // Genotypes
     int ngt = 0;
     int32_t* gt = NULL;
+    int32_t nac = 0;
+    int32_t* ac = NULL;
     
     // Collect Snps for this chromosome
     int32_t chrid = bcf_hdr_name2id(hdr, chrom.c_str());
@@ -123,7 +126,11 @@ namespace phasebam
 	    std::vector<std::string> alleles;
 	    for(std::size_t i = 0; i<rec->n_allele; ++i) alleles.push_back(std::string(rec->d.allele[i]));
 	    // Only bi-allelic variants
-	    if (alleles.size() == 2) pV.push_back(TVariant(rec->pos, std::string(alleles[0]), std::string(alleles[1]), bcf_gt_allele(gt[sampleIndex*2])));
+	    if (alleles.size() == 2) {
+	      int32_t acVal = -1;
+	      if (bcf_get_info_int32(hdr, rec, "AC", &ac, &nac) > 0) acVal = *ac;
+	      pV.push_back(TVariant(rec->pos, acVal, std::string(alleles[0]), std::string(alleles[1]), bcf_gt_allele(gt[sampleIndex*2])));
+	    }
 	  }
 	}
       }
@@ -131,6 +138,7 @@ namespace phasebam
       hts_itr_destroy(itervcf);
     }
     if (gt != NULL) free(gt);
+    if (ac != NULL) free(ac);
     
     // Close VCF
     bcf_hdr_destroy(hdr);
