@@ -108,6 +108,11 @@ evaluatePhasing(TConfig& c) {
     }
   }
 
+  // Hamming count
+  int32_t hamcount = 0;
+  for(uint32_t i=0; i<hap1.size();++i)
+    if (hap1[i].hap != hap2[i].hap) ++hamcount;
+
   // Get differences
   typedef std::vector<bool> THap;
   THap diff1(hap1.size() - 1, 0);
@@ -140,8 +145,8 @@ evaluatePhasing(TConfig& c) {
 
 
   // Switch count
-  std::cout << "Sample\tChromosome\tCommonSites\tDistinctBCF1\tDistinctBCF2\tSwitchErrors\tSwitchErrorRate" << std::endl;
-  std::cout << c.sample << "\t" << c.chrom << "\t" << commonSites << "\t" << distinctSites1 << "\t" << distinctSites2 << "\t" << switchcount << "\t" << (double) switchcount / (double) diff1.size() << std::endl;
+  std::cout << "Sample\tChromosome\tCommonSites\tDistinctBCF1\tDistinctBCF2\tSwitchErrors\tSwitchErrorRate\tHammingDistance\tHammingErrorRate" << std::endl;
+  std::cout << c.sample << "\t" << c.chrom << "\t" << commonSites << "\t" << distinctSites1 << "\t" << distinctSites2 << "\t" << switchcount << "\t" << (double) switchcount / (double) diff1.size() << "\t" << hamcount << "\t" << (double) hamcount / (double) hap1.size() << std::endl;
 
   
 #ifdef PROFILE
