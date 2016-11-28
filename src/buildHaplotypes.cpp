@@ -200,17 +200,21 @@ buildLOHHaps(TConfig& c) {
     bcf_update_format_int32(hdr_out, rec_out, "RR", rrcount, 1);
     rvcount[0] = alt[ip - pv.begin()];
     bcf_update_format_int32(hdr_out, rec_out, "RV", rvcount, 1);
-    if (rrcount[0] + rvcount[0] >= c.mincov) {
+    bool phased = false;
+    if ((rrcount[0] + rvcount[0] >= c.mincov) && (ip->ref.size() == 1) && (ip->alt.size() == 1)) {
       if (rrcount[0] > 2 * rvcount[0]) {
+	phased = true;
 	gts[0] = bcf_gt_phased(0);
 	gts[1] = bcf_gt_phased(1);
       } else if (rvcount[0] > 2 * rrcount[0]) {
+	phased = true;
 	gts[0] = bcf_gt_phased(1);
 	gts[1] = bcf_gt_phased(0);
-      } else {
-	gts[0] = bcf_gt_missing;
-	gts[1] = bcf_gt_missing;
       }
+    }
+    if (!phased) {
+      gts[0] = bcf_gt_missing;
+      gts[1] = bcf_gt_missing;
     }
     bcf_update_genotypes(hdr_out, rec_out, gts, 2);
     bcf_write1(fp, hdr_out, rec_out);
