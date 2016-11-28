@@ -34,7 +34,7 @@ BOOSTSOURCES = $(wildcard src/modular-boost/libs/iostreams/include/boost/iostrea
 PHASESOURCES = $(wildcard src/*.h) $(wildcard src/*.cpp)
 
 # Targets
-TARGETS = .htslib .boost src/phaseBam src/evaluatePhasing
+TARGETS = .htslib .boost src/phaseBam src/evaluatePhasing src/buildHaplotypes
 
 all:   	$(TARGETS)
 
@@ -48,6 +48,9 @@ src/phaseBam: .htslib .boost $(PHASESOURCES)
 	$(CXX) $(CXXFLAGS) $@.cpp -o $@ $(LDFLAGS)
 
 src/evaluatePhasing: .htslib .boost $(PHASESOURCES)
+	$(CXX) $(CXXFLAGS) $@.cpp -o $@ $(LDFLAGS)
+
+src/buildHaplotypes: .htslib .boost $(PHASESOURCES)
 	$(CXX) $(CXXFLAGS) $@.cpp -o $@ $(LDFLAGS)
 
 clean:
