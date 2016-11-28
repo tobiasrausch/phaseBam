@@ -209,7 +209,7 @@ buildLOHHaps(TConfig& c) {
 	gts[1] = bcf_gt_phased(0);
       } else {
 	gts[0] = bcf_gt_missing;
-	gts[2] = bcf_gt_missing;
+	gts[1] = bcf_gt_missing;
       }
     }
     bcf_update_genotypes(hdr_out, rec_out, gts, 2);
