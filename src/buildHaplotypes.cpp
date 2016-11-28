@@ -251,7 +251,7 @@ int main(int argc, char **argv) {
   generic.add_options()
     ("help,?", "show help message")
     ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "reference fasta file")
-    ("mincov,m", boost::program_options::value<int32_t>(&c.mincov), "min. coverage")
+    ("mincov,m", boost::program_options::value<int32_t>(&c.mincov)->default_value(10), "min. coverage")
     ("chrom,c", boost::program_options::value<std::string>(&c.chrom)->default_value("1"), "chromosome name")
     ("sample,s", boost::program_options::value<std::string>(&c.sample)->default_value("NA12878"), "sample name")
     ("vcffile,v", boost::program_options::value<boost::filesystem::path>(&c.vcffile), "phased BCF file")
