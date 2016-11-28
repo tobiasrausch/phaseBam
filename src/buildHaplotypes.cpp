@@ -54,6 +54,7 @@ Contact: Tobias Rausch (rausch@embl.de)
 using namespace phasebam;
 
 struct Config {
+  int32_t mincov;
   std::string sample;
   std::string chrom;
   boost::filesystem::path genome;
@@ -199,12 +200,17 @@ buildLOHHaps(TConfig& c) {
     bcf_update_format_int32(hdr_out, rec_out, "RR", rrcount, 1);
     rvcount[0] = alt[ip - pv.begin()];
     bcf_update_format_int32(hdr_out, rec_out, "RV", rvcount, 1);
-    if (rrcount[0] > rvcount[0]) {
-      gts[0] = bcf_gt_phased(0);
-      gts[1] = bcf_gt_phased(1);
-    } else {
-      gts[0] = bcf_gt_phased(1);
-      gts[1] = bcf_gt_phased(0);
+    if (rrcount[0] + rvcount[0] >= c.mincov) {
+      if (rrcount[0] > 2 * rvcount[0]) {
+	gts[0] = bcf_gt_phased(0);
+	gts[1] = bcf_gt_phased(1);
+      } else if (rvcount[0] > 2 * rrcount[0]) {
+	gts[0] = bcf_gt_phased(1);
+	gts[1] = bcf_gt_phased(0);
+      } else {
+	gts[0] = bcf_gt_missing;
+	gts[2] = bcf_gt_missing;
+      }
     }
     bcf_update_genotypes(hdr_out, rec_out, gts, 2);
     bcf_write1(fp, hdr_out, rec_out);
@@ -245,6 +251,7 @@ int main(int argc, char **argv) {
   generic.add_options()
     ("help,?", "show help message")
     ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "reference fasta file")
+    ("mincov,m", boost::program_options::value<int32_t>(&c.mincov), "min. coverage")
     ("chrom,c", boost::program_options::value<std::string>(&c.chrom)->default_value("1"), "chromosome name")
     ("sample,s", boost::program_options::value<std::string>(&c.sample)->default_value("NA12878"), "sample name")
     ("vcffile,v", boost::program_options::value<boost::filesystem::path>(&c.vcffile), "phased BCF file")
