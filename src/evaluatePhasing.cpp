@@ -54,6 +54,8 @@ Contact: Tobias Rausch (rausch@embl.de)
 using namespace phasebam;
 
 struct Config {
+  bool filterForPass;
+  int32_t minac;
   std::string chrom;
   std::string sample;
   boost::filesystem::path outfile;
@@ -74,8 +76,8 @@ evaluatePhasing(TConfig& c) {
   typedef std::vector<Variant> TPhasedVariants;
   TPhasedVariants pV1;
   TPhasedVariants pV2;
-  if (!_loadVariants(c.sample, c.chrom, c.p1.string(), pV1)) return -1;
-  if (!_loadVariants(c.sample, c.chrom, c.p2.string(), pV2)) return -1;
+  if (!_loadVariants(c.sample, c.chrom, c.p1.string(), c.filterForPass, c.minac, true, pV1)) return -1;
+  if (!_loadVariants(c.sample, c.chrom, c.p2.string(), false, 0, true, pV2)) return -1;
 
   // Find common variants
   TPhasedVariants hap1;
@@ -115,10 +117,14 @@ evaluatePhasing(TConfig& c) {
 
   // Get differences
   typedef std::vector<bool> THap;
-  THap diff1(hap1.size() - 1, 0);
+  int32_t diff1size = 0;
+  if (!hap1.empty()) diff1size = hap1.size() - 1;
+  THap diff1(diff1size, 0);
   for(uint32_t i=1; i<hap1.size();++i)
     if (hap1[i-1].hap != hap1[i].hap) diff1[i-1]=1;
-  THap diff2(hap2.size() - 1, 0);
+  int32_t diff2size = 0;
+  if (!hap2.empty()) diff2size = hap2.size() - 1;
+  THap diff2(diff2size, 0);
   for(uint32_t i=1; i<hap2.size();++i)
     if (hap2[i-1].hap != hap2[i].hap) diff2[i-1]=1;
 
@@ -127,7 +133,7 @@ evaluatePhasing(TConfig& c) {
   dataOut.push(boost::iostreams::gzip_compressor());
   dataOut.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
   dataOut << "distance\tacPre\tacSuc" << std::endl;
-  
+
   int32_t lastPos = -1;
   int32_t switchcount = 0;
   for(uint32_t i=0; i<diff1.size(); ++i) {
@@ -168,6 +174,8 @@ int main(int argc, char **argv) {
     ("sample,s", boost::program_options::value<std::string>(&c.sample)->default_value("HG00512"), "sample name")
     ("chrom,c", boost::program_options::value<std::string>(&c.chrom)->default_value("1"), "chromosome name")
     ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("swerr.gz"), "switch error")
+    ("minac,m", boost::program_options::value<int32_t>(&c.minac)->default_value(25), "min. allele count in gold-standard phased BCF")
+    ("pass,a", "Filter sites for PASS in gold-standard phased BCF")
     ;
 
   boost::program_options::options_description hidden("Hidden options");
@@ -245,5 +253,9 @@ int main(int argc, char **argv) {
     bcf_close(ifile);
   }
 
+  // Filter for PASS
+  if (vm.count("pass")) c.filterForPass = true;
+  else c.filterForPass = false;
+  
   return evaluatePhasing(c);
 }

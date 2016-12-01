@@ -110,7 +110,7 @@ phaseBamRun(TConfig& c) {
     // Load het. markers
     typedef std::vector<Variant> TPhasedVariants;
     TPhasedVariants pv;
-    if (!_loadVariants(c.sample, chrName, c.vcffile.string(), pv)) return -1;
+    if (!_loadVariants(c.sample, chrName, c.vcffile.string(), false, 0, true, pv)) return -1;
     if (pv.empty()) continue;
     
     // Load reference

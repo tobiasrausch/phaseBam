@@ -85,10 +85,10 @@ namespace phasebam
     return rec->core.pos + alen;
   }
 
-  template<typename TPhasedVariants>
+  template<typename TVariants>
   inline bool
-  _loadVariants(std::string const& sample, std::string const& chrom, std::string const& bcffile, TPhasedVariants& pV) {
-    typedef typename TPhasedVariants::value_type TVariant;
+    _loadVariants(std::string const& sample, std::string const& chrom, std::string const& bcffile, bool const filterForPass, int32_t const minac, bool const onlyHet, TVariants& pV) {
+    typedef typename TVariants::value_type TVariant;
     
     // Load bcf file
     htsFile* ifile = hts_open(bcffile.c_str(), "r");
@@ -97,11 +97,8 @@ namespace phasebam
     int32_t sampleIndex = -1;
     for (int i = 0; i < bcf_hdr_nsamples(hdr); ++i)
       if (hdr->samples[i] == sample) sampleIndex = i;
-    if (sampleIndex < 0) {
-      std::cerr << "Sample not found " << sample << std::endl;
-      return false;
-    }
-    
+    if (sampleIndex < 0) return false;
+        
     // Genotypes
     int ngt = 0;
     int32_t* gt = NULL;
@@ -110,26 +107,31 @@ namespace phasebam
     
     // Collect Snps for this chromosome
     int32_t chrid = bcf_hdr_name2id(hdr, chrom.c_str());
-    if (chrid < 0) {
-      std::cerr << "Chromosome not found " << chrom << std::endl;
-      return false;
-    }
+    if (chrid < 0) return false;
     hts_itr_t* itervcf = bcf_itr_querys(bcfidx, hdr, chrom.c_str());
     if (itervcf != NULL) {
       bcf1_t* rec = bcf_init1();
       while (bcf_itr_next(ifile, itervcf, rec) >= 0) {
 	bcf_unpack(rec, BCF_UN_ALL);
-	bcf_get_genotypes(hdr, rec, &gt, &ngt);
-	if ((bcf_gt_allele(gt[sampleIndex*2]) != -1) && (bcf_gt_allele(gt[sampleIndex*2 + 1]) != -1) && (!bcf_gt_is_missing(gt[sampleIndex*2])) && (!bcf_gt_is_missing(gt[sampleIndex*2 + 1])) && (bcf_gt_is_phased(gt[sampleIndex*2 + 1]))) {
-	  int gt_type = bcf_gt_allele(gt[sampleIndex*2]) + bcf_gt_allele(gt[sampleIndex*2 + 1]);
-	  if (gt_type == 1) {
-	    std::vector<std::string> alleles;
-	    for(std::size_t i = 0; i<rec->n_allele; ++i) alleles.push_back(std::string(rec->d.allele[i]));
-	    // Only bi-allelic variants
-	    if (alleles.size() == 2) {
-	      int32_t acVal = -1;
-	      if (bcf_get_info_int32(hdr, rec, "AC", &ac, &nac) > 0) acVal = *ac;
-	      pV.push_back(TVariant(rec->pos, acVal, std::string(alleles[0]), std::string(alleles[1]), bcf_gt_allele(gt[sampleIndex*2])));
+	bool pass = true;
+	if (filterForPass) pass = (bcf_has_filter(hdr, rec, const_cast<char*>("PASS"))==1);
+	if (pass) {
+	  bcf_get_genotypes(hdr, rec, &gt, &ngt);
+	  if ((bcf_gt_allele(gt[sampleIndex*2]) != -1) && (bcf_gt_allele(gt[sampleIndex*2 + 1]) != -1) && (!bcf_gt_is_missing(gt[sampleIndex*2])) && (!bcf_gt_is_missing(gt[sampleIndex*2 + 1]))) {
+	    int gt_type = bcf_gt_allele(gt[sampleIndex*2]) + bcf_gt_allele(gt[sampleIndex*2 + 1]);
+	    if ((gt_type == 1) || (!onlyHet)) {
+	      std::vector<std::string> alleles;
+	      for(std::size_t i = 0; i<rec->n_allele; ++i) alleles.push_back(std::string(rec->d.allele[i]));
+	      // Only bi-allelic variants
+	      if (alleles.size() == 2) {
+		int32_t acVal = -1;
+		int32_t thres = 0;
+		if (bcf_get_info_int32(hdr, rec, "AC", &ac, &nac) > 0) {
+		  acVal = *ac;
+		  thres = *ac;
+		}
+		if (thres >= minac) pV.push_back(TVariant(rec->pos, acVal, std::string(alleles[0]), std::string(alleles[1]), bcf_gt_allele(gt[sampleIndex*2])));
+	      }
 	    }
 	  }
 	}

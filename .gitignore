@@ -2,7 +2,7 @@
 .htslib
 src/phaseBam
 src/evaluatePhasing
-src/buildHaplotypes
+src/annotateRefAlt
 
 # Compiled Object files
 *.slo
