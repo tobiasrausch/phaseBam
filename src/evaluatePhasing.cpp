@@ -132,7 +132,7 @@ evaluatePhasing(TConfig& c) {
   boost::iostreams::filtering_ostream dataOut;
   dataOut.push(boost::iostreams::gzip_compressor());
   dataOut.push(boost::iostreams::file_sink(c.outfile.string().c_str(), std::ios_base::out | std::ios_base::binary));
-  dataOut << "distance\tacPre\tacSuc" << std::endl;
+  dataOut << "chr\tpos\tdistance\tacPre\tacSuc" << std::endl;
 
   int32_t lastPos = -1;
   int32_t switchcount = 0;
@@ -141,6 +141,7 @@ evaluatePhasing(TConfig& c) {
       int32_t distance = -1;
       if (lastPos != -1) distance = (hap1[i].pos - lastPos);
       lastPos = hap1[i+1].pos;
+      dataOut << c.chrom << "\t" << hap1[i].pos << "\t";
       if (distance != -1) dataOut << distance << "\t";
       else dataOut << "NA\t";
       if ((hap1[i].ac != -1) && (hap1[i+1].ac != -1)) dataOut << hap1[i].ac << '\t' << hap1[i+1].ac << std::endl;
@@ -174,7 +175,7 @@ int main(int argc, char **argv) {
     ("sample,s", boost::program_options::value<std::string>(&c.sample)->default_value("HG00512"), "sample name")
     ("chrom,c", boost::program_options::value<std::string>(&c.chrom)->default_value("1"), "chromosome name")
     ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile)->default_value("swerr.gz"), "switch error")
-    ("minac,m", boost::program_options::value<int32_t>(&c.minac)->default_value(25), "min. allele count in gold-standard phased BCF")
+    ("minac,m", boost::program_options::value<int32_t>(&c.minac)->default_value(0), "min. allele count in gold-standard phased BCF")
     ("pass,a", "Filter sites for PASS in gold-standard phased BCF")
     ;
 

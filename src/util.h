@@ -85,15 +85,12 @@ namespace phasebam
     return rec->core.pos + alen;
   }
 
+
   template<typename TVariants>
   inline bool
-    _loadVariants(std::string const& sample, std::string const& chrom, std::string const& bcffile, bool const filterForPass, int32_t const minac, bool const onlyHet, TVariants& pV) {
+    _loadVariants(htsFile* ifile, hts_idx_t* bcfidx, bcf_hdr_t* hdr, std::string const& sample, std::string const& chrom, bool const filterForPass, int32_t const minac, bool const onlyHet, TVariants& pV) {
     typedef typename TVariants::value_type TVariant;
     
-    // Load bcf file
-    htsFile* ifile = hts_open(bcffile.c_str(), "r");
-    hts_idx_t* bcfidx = bcf_index_load(bcffile.c_str());
-    bcf_hdr_t* hdr = bcf_hdr_read(ifile);
     int32_t sampleIndex = -1;
     for (int i = 0; i < bcf_hdr_nsamples(hdr); ++i)
       if (hdr->samples[i] == sample) sampleIndex = i;
@@ -130,7 +127,10 @@ namespace phasebam
 		  acVal = *ac;
 		  thres = *ac;
 		}
-		if (thres >= minac) pV.push_back(TVariant(rec->pos, acVal, std::string(alleles[0]), std::string(alleles[1]), bcf_gt_allele(gt[sampleIndex*2])));
+		if (thres >= minac) {
+		  //std::cerr << chrom << "\t" << (rec->pos + 1) << "\t" << std::string(alleles[0]) << "\t" << std::string(alleles[1]) << std::endl;
+		  pV.push_back(TVariant(rec->pos, acVal, std::string(alleles[0]), std::string(alleles[1]), bcf_gt_allele(gt[sampleIndex*2])));
+		}
 	      }
 	    }
 	  }
@@ -141,13 +141,27 @@ namespace phasebam
     }
     if (gt != NULL) free(gt);
     if (ac != NULL) free(ac);
+    return true;
+  }
+  
+
+  
+  template<typename TVariants>
+  inline bool
+  _loadVariants(std::string const& sample, std::string const& chrom, std::string const& bcffile, bool const filterForPass, int32_t const minac, bool const onlyHet, TVariants& pV) {
+    // Load BCF file
+    htsFile* ifile = bcf_open(bcffile.c_str(), "r");
+    hts_idx_t* bcfidx = bcf_index_load(bcffile.c_str());
+    bcf_hdr_t* hdr = bcf_hdr_read(ifile);
+
+    bool retVal = _loadVariants(ifile, bcfidx, hdr, sample, chrom, filterForPass, minac, onlyHet, pV);
     
-    // Close VCF
+    // Close BCF
     bcf_hdr_destroy(hdr);
     hts_idx_destroy(bcfidx);
     bcf_close(ifile);
     
-    return true;
+    return retVal;
   }
 
 

@@ -76,6 +76,11 @@ phaseBamRun(TConfig& c) {
   hts_idx_t* idx = sam_index_load(samfile, c.bamfile.string().c_str());
   bam_hdr_t* hdr = sam_hdr_read(samfile);
 
+  // Load bcf file
+  htsFile* ibcffile = bcf_open(c.vcffile.string().c_str(), "r");
+  hts_idx_t* bcfidx = bcf_index_load(c.vcffile.string().c_str());
+  bcf_hdr_t* bcfhdr = bcf_hdr_read(ibcffile);
+
   boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
   std::cout << '[' << boost::posix_time::to_simple_string(now) << "] " << "Assign reads to haplotypes" << std::endl;
   boost::progress_display show_progress(hdr->n_targets);
@@ -110,8 +115,11 @@ phaseBamRun(TConfig& c) {
     // Load het. markers
     typedef std::vector<Variant> TPhasedVariants;
     TPhasedVariants pv;
-    if (!_loadVariants(c.sample, chrName, c.vcffile.string(), false, 0, true, pv)) return -1;
+    if (!_loadVariants(ibcffile, bcfidx, bcfhdr, c.sample, chrName, false, 0, true, pv)) continue;
     if (pv.empty()) continue;
+
+    // Sort variants
+    std::sort(pv.begin(), pv.end(), SortVariants<Variant>());
     
     // Load reference
     int32_t seqlen = -1;
@@ -156,14 +164,43 @@ phaseBamRun(TConfig& c) {
 		    if (vIt->ref == std::string(seq + gp, seq + gp + vIt->ref.size())) {
 		      // Check ALT allele
 		      if ((sp + vIt->alt.size() < sequence.size()) && (sp + vIt->ref.size() < sequence.size())) {
-			if ((sequence.substr(sp, vIt->alt.size()) == vIt->alt) && (sequence.substr(sp, vIt->ref.size()) != vIt->ref)) {
-			  // ALT supporting read
-			  if (vIt->hap) ++hp1votes;
-			  else ++hp2votes;
-			} else if ((sequence.substr(sp, vIt->alt.size()) != vIt->alt) && (sequence.substr(sp, vIt->ref.size()) == vIt->ref)) {
-			  // REF supporting read
-			  if (vIt->hap) ++hp2votes;
-			  else ++hp1votes;
+			if (vIt->ref.size() == vIt->alt.size()) {
+			  // SNP
+			  if ((sequence.substr(sp, vIt->alt.size()) == vIt->alt) && (sequence.substr(sp, vIt->ref.size()) != vIt->ref)) {
+			    // ALT supporting read
+			    if (vIt->hap) ++hp1votes;
+			    else ++hp2votes;
+			  } else if ((sequence.substr(sp, vIt->alt.size()) != vIt->alt) && (sequence.substr(sp, vIt->ref.size()) == vIt->ref)) {
+			    // REF supporting read
+			    if (vIt->hap) ++hp2votes;
+			    else ++hp1votes;
+			  }
+			} else if (vIt->ref.size() < vIt->alt.size()) {
+			  // Insertion
+			  int32_t diff = vIt->alt.size() - vIt->ref.size();
+			  std::string refProbe = vIt->ref + std::string(seq + gp + vIt->ref.size(), seq + gp + vIt->ref.size() + diff);
+			  if ((sequence.substr(sp, vIt->alt.size()) == vIt->alt) && (sequence.substr(sp, vIt->alt.size()) != refProbe)) {
+			    // ALT supporting read
+			    if (vIt->hap) ++hp1votes;
+			    else ++hp2votes;
+			  } else if ((sequence.substr(sp, vIt->alt.size()) != vIt->alt) && (sequence.substr(sp, vIt->alt.size()) == refProbe)) {
+			    // REF supporting read
+			    if (vIt->hap) ++hp2votes;
+			    else ++hp1votes;
+			  }
+			} else {
+			  // Deletion
+			  int32_t diff = vIt->ref.size() - vIt->alt.size();
+			  std::string altProbe = vIt->alt + std::string(seq + gp + vIt->ref.size(), seq + gp + vIt->ref.size() + diff);
+			  if ((sequence.substr(sp, vIt->ref.size()) == altProbe) && (sequence.substr(sp, vIt->ref.size()) != vIt->ref)) {
+			    // ALT supporting read
+			    if (vIt->hap) ++hp1votes;
+			    else ++hp2votes;
+			  } else if ((sequence.substr(sp, vIt->ref.size()) != altProbe) && (sequence.substr(sp, vIt->ref.size()) == vIt->ref)) {
+			    // REF supporting read
+			    if (vIt->hap) ++hp2votes;
+			    else ++hp1votes;
+			  }
 			}
 		      }
 		    }
@@ -238,6 +275,11 @@ phaseBamRun(TConfig& c) {
   bam_index_build(c.h1bam.string().c_str(), 0);
   bam_index_build(c.h2bam.string().c_str(), 0);
 
+  // Close BCF
+  bcf_hdr_destroy(bcfhdr);
+  hts_idx_destroy(bcfidx);
+  bcf_close(ibcffile);
+  
   // End
   now = boost::posix_time::second_clock::local_time();
   std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Done." << std::endl;
