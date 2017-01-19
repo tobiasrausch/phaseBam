@@ -135,25 +135,51 @@ evaluatePhasing(TConfig& c) {
   dataOut << "chr\tpos\tdistance\tacPre\tacSuc" << std::endl;
 
   int32_t lastPos = -1;
+  int32_t lastCoord = -1;
   int32_t switchcount = 0;
+  int32_t flipcount = 0;
+  typedef std::vector<int32_t> TInterSwitchErrorDistance;
+  TInterSwitchErrorDistance distSWE;
   for(uint32_t i=0; i<diff1.size(); ++i) {
     if (diff1[i] != diff2[i]) {
       int32_t distance = -1;
-      if (lastPos != -1) distance = (hap1[i].pos - lastPos);
-      lastPos = hap1[i+1].pos;
+      if (lastPos != -1) distance = (i - lastPos);
+      lastPos = i;
       dataOut << c.chrom << "\t" << hap1[i].pos << "\t";
       if (distance != -1) dataOut << distance << "\t";
       else dataOut << "NA\t";
       if ((hap1[i].ac != -1) && (hap1[i+1].ac != -1)) dataOut << hap1[i].ac << '\t' << hap1[i+1].ac << std::endl;
       else dataOut << "NA\tNA" << std::endl;
-      ++switchcount;
+      if (distance == 1) ++flipcount;
+      else {
+	int32_t iswedist = -1;
+	if (lastCoord != -1) iswedist = (hap1[i].pos - lastCoord);
+	lastCoord = hap1[i+1].pos;
+	if (iswedist != -1) distSWE.push_back(iswedist);
+	++switchcount;
+      }
+    }
+  }
+  
+  // Get N50
+  int32_t n50 = -1;
+  std::sort(distSWE.begin(), distSWE.end());
+  if (!distSWE.empty()) {
+    int32_t distFirstToLast = hap1[hap1.size() - 1].pos - hap1[0].pos;
+    int32_t halfDist = distFirstToLast / 2;
+    int32_t sum = 0;
+    for(uint32_t i = 0; i < distSWE.size(); ++i) {
+      sum += distSWE[i];
+      if (sum > halfDist) {
+	n50 = distSWE[i];
+	break;
+      }
     }
   }
 
-
   // Switch count
-  std::cout << "Sample\tChromosome\tCommonSites\tDistinctBCF1\tDistinctBCF2\tSwitchErrors\tSwitchErrorRate\tHammingDistance\tHammingErrorRate" << std::endl;
-  std::cout << c.sample << "\t" << c.chrom << "\t" << commonSites << "\t" << distinctSites1 << "\t" << distinctSites2 << "\t" << switchcount << "\t" << (double) switchcount / (double) diff1.size() << "\t" << hamcount << "\t" << (double) hamcount / (double) hap1.size() << std::endl;
+  std::cout << "Sample\tChromosome\tCommonSites\tDistinctBCF1\tDistinctBCF2\tFlipErrors\tFlipErrorRate\tSwitchErrors\tSwitchErrorRate\tN50PhasedBlockLength\tHammingDistance\tHammingErrorRate" << std::endl;
+  std::cout << c.sample << "\t" << c.chrom << "\t" << commonSites << "\t" << distinctSites1 << "\t" << distinctSites2 << "\t" << flipcount << "\t" << (double) flipcount / (double) diff1.size() << "\t" << switchcount << "\t" << (double) switchcount / (double) diff1.size() << "\t" << n50 << "\t" << hamcount << "\t" << (double) hamcount / (double) hap1.size() << std::endl;
 
   
 #ifdef PROFILE
