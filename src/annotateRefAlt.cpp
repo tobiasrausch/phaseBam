@@ -103,6 +103,11 @@ annotateRefAlt(TConfig& c) {
   bcf_hdr_add_sample(hdr_out, c.sample.c_str());
   bcf_hdr_add_sample(hdr_out, NULL);
   bcf_hdr_write(fp, hdr_out);
+
+  // Counter
+  uint32_t numhetphased=0;
+  uint32_t numhetcovdropout=0;
+  uint32_t numhetaltrefdropout=0;
   
   // Iterate chromosomes
   faidx_t* fai = fai_load(c.genome.string().c_str());
@@ -216,20 +221,30 @@ annotateRefAlt(TConfig& c) {
       rvcount[0] = alt[ip - var.begin()];
       bcf_update_format_int32(hdr_out, rec_out, "RV", rvcount, 1);
       bool phased = false;
-      if ((c.attemptPhasing) && (rrcount[0] + rvcount[0] >= c.mincov)) {
-	if (rrcount[0] > 2 * rvcount[0]) {
-	  phased = true;
-	  gts[0] = bcf_gt_phased(0);
-	  gts[1] = bcf_gt_phased(1);
-	} else if (rvcount[0] > 2 * rrcount[0]) {
-	  phased = true;
-	  gts[0] = bcf_gt_phased(1);
-	  gts[1] = bcf_gt_phased(0);
+      if (c.attemptPhasing) {
+	if (rrcount[0] + rvcount[0] >= c.mincov) {
+	  if (rrcount[0] > 2 * rvcount[0]) {
+	    phased = true;
+	    gts[0] = bcf_gt_phased(0);
+	    gts[1] = bcf_gt_phased(1);
+	  } else if (rvcount[0] > 2 * rrcount[0]) {
+	    phased = true;
+	    gts[0] = bcf_gt_phased(1);
+	    gts[1] = bcf_gt_phased(0);
+	  } else {
+	    // Unclear Ref-Alt dropout
+	    ++numhetaltrefdropout;
+	  }
+	} else {
+	  // Coverage dropout
+	  ++numhetcovdropout;
 	}
       }
       if (!phased) {
 	gts[0] = bcf_gt_missing;
 	gts[1] = bcf_gt_missing;
+      } else {
+	++numhetphased;
       }
       bcf_update_genotypes(hdr_out, rec_out, gts, 2);
       bcf_write1(fp, hdr_out, rec_out);
@@ -255,7 +270,14 @@ annotateRefAlt(TConfig& c) {
   bam_hdr_destroy(hdr);
   hts_idx_destroy(idx);
   sam_close(samfile);
-  
+
+  // Phasing statistics
+  if (c.attemptPhasing) {
+    double total = numhetphased + numhetcovdropout + numhetaltrefdropout;
+    std::cout << "HetPhased=" << numhetphased << ",HetCoverageDropout=" << numhetcovdropout << ",HetUnclearRefAlt=" << numhetaltrefdropout << std::endl;
+    std::cout << "HetPhasedFraction=" << (double) numhetphased / total << ",HetCoverageDropoutFraction=" << (double) numhetcovdropout / total << ",HetUnclearRefAltFraction=" << (double) numhetaltrefdropout / total << std::endl;
+  }
+
   // End
   now = boost::posix_time::second_clock::local_time();
   std::cout << '[' << boost::posix_time::to_simple_string(now) << "] Done." << std::endl;
